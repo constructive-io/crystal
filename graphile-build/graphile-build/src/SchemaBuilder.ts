@@ -9,7 +9,10 @@ import { inspect } from "util";
 
 import type { BehaviorDynamicMethods } from "./behavior.ts";
 import { Behavior } from "./behavior.ts";
-import makeNewBuild from "./makeNewBuild.ts";
+import makeNewBuild, {
+  finalizeAfterSchemaValidationCallbackRegistration,
+  runAfterSchemaValidationCallbacks,
+} from "./makeNewBuild.ts";
 import type { NewWithHooksFunction } from "./newWithHooks/index.ts";
 import { makeNewWithHooks } from "./newWithHooks/index.ts";
 import { makeSchemaBuilderHooks } from "./SchemaBuilderHooks.ts";
@@ -221,6 +224,7 @@ class SchemaBuilder<
       scope: Object.create(null),
       type: "build",
     });
+    finalizeAfterSchemaValidationCallbackRegistration(build);
 
     // Bind all functions so they can be dereferenced
     bindAll(
@@ -307,6 +311,8 @@ class SchemaBuilder<
         )}`,
       );
     }
+
+    runAfterSchemaValidationCallbacks(build);
 
     return schema;
   }

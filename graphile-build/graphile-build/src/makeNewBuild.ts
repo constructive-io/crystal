@@ -29,6 +29,53 @@ import { version } from "./version.ts";
 
 const BUILTINS = ["Int", "Float", "Boolean", "ID", "String"];
 
+interface AfterSchemaValidationState {
+  status: "registering" | "ready" | "running" | "complete";
+  callbacks: Array<() => void>;
+}
+
+const afterSchemaValidationStates = new WeakMap<
+  GraphileBuild.BuildBase,
+  AfterSchemaValidationState
+>();
+
+/** @internal */
+export function finalizeAfterSchemaValidationCallbackRegistration(
+  build: GraphileBuild.BuildBase,
+): void {
+  const state = afterSchemaValidationStates.get(build);
+  if (state?.status !== "registering") {
+    throw new Error(
+      "After-schema-validation callback registration was already finalized",
+    );
+  }
+  state.status = "ready";
+}
+
+/** @internal */
+export function runAfterSchemaValidationCallbacks(
+  build: GraphileBuild.BuildBase,
+): void {
+  const state = afterSchemaValidationStates.get(build);
+  if (!state || state.status === "complete") {
+    return;
+  }
+  if (state.status !== "ready") {
+    throw new Error(
+      "After-schema-validation callbacks cannot run before registration is finalized",
+    );
+  }
+  state.status = "running";
+  const callbacks = state.callbacks.splice(0);
+  try {
+    for (const callback of callbacks) {
+      callback();
+    }
+  } finally {
+    state.status = "complete";
+  }
+}
+
 /** Have we warned the user they're using the 5-arg deprecated registerObjectType call? */
 let registerObjectType5argsDeprecatedWarned = false;
 
@@ -144,6 +191,24 @@ export default function makeNewBuild(
       "graphile-build": version,
     },
     input,
+
+    registerAfterSchemaValidation(callback) {
+      const state = afterSchemaValidationStates.get(build);
+      if (
+        state?.status !== "registering" ||
+        build.status.currentHookEvent !== "build"
+      ) {
+        throw new Error(
+          "After-schema-validation callbacks may only be registered during the 'build' hook",
+        );
+      }
+      if (typeof callback !== "function") {
+        throw new TypeError(
+          "build.registerAfterSchemaValidation requires a function",
+        );
+      }
+      state.callbacks.push(callback);
+    },
 
     hasVersion(
       packageName: keyof GraphileBuild.BuildVersions,
@@ -562,6 +627,10 @@ style for these configuration options (e.g. change \`interfaces: \
 
     _pluginMeta: Object.create(null),
   };
+  afterSchemaValidationStates.set(build, {
+    status: "registering",
+    callbacks: [],
+  });
   return build;
 }
 

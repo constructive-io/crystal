@@ -363,6 +363,15 @@ declare global {
       input: BuildInput;
 
       /**
+       * Registers a synchronous callback that will be invoked after the schema
+       * has been constructed and validated successfully.
+       *
+       * Callbacks may only be registered from the `build` hook. They are
+       * invoked at most once, in registration order.
+       */
+      registerAfterSchemaValidation(callback: () => void): void;
+
+      /**
        * Returns true if `Build.versions` contains an entry for `packageName`
        * compatible with the version range `range`, false otherwise.
        */
