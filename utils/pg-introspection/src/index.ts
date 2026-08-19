@@ -22,6 +22,12 @@ import type {
   PgType,
 } from "./introspection.ts";
 export { makeIntrospectionQuery } from "./introspection.ts";
+export {
+  makeSchemaScopedIntrospectionQuery,
+  type SchemaScopedIntrospectionOptions,
+  type SchemaScopedIntrospectionQuery,
+  type ScopedCatalogTypes,
+} from "./scopedIntrospection.ts";
 import type { AclObject } from "./acl.ts";
 import {
   aclContainsRole,
