@@ -21,11 +21,14 @@ import type {
   PgRoles,
   PgType,
 } from "pg-introspection";
-import {
-  makeIntrospectionQuery,
-  parseIntrospectionResults,
-} from "pg-introspection";
+import { parseIntrospectionResults } from "pg-introspection";
 
+import {
+  assertDependencyClosureTypes,
+  assertScopedNamespaces,
+  getIntrospectionQuery,
+  type IntrospectionScope,
+} from "../scopedIntrospection.ts";
 import { version } from "../version.ts";
 import { watchFixtures } from "../watchFixtures.ts";
 
@@ -236,10 +239,12 @@ declare global {
   }
 }
 
-type RawIntrospectionResults = Array<{
-  pgService: GraphileConfig.PgServiceConfiguration;
-  introspectionText: string;
-}>;
+type RawIntrospectionResults = Array<
+  {
+    pgService: GraphileConfig.PgServiceConfiguration;
+    introspectionText: string;
+  } & IntrospectionScope
+>;
 type IntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
   introspection: Introspection;
@@ -539,11 +544,29 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
             const rawIntrospections = await introspectionPromise;
 
             const introspections: IntrospectionResults = rawIntrospections.map(
-              ({ pgService, introspectionText }) => ({
+              ({
                 pgService,
+                introspectionText,
+                requiredSchemas,
+                allowedSchemas,
+                catalogTypes,
+              }) => {
                 // IMPORTANT: parseIntrospectionResults must NOT be cached, because other plugins mutate it.
-                introspection: parseIntrospectionResults(introspectionText),
-              }),
+                const introspection =
+                  parseIntrospectionResults(introspectionText);
+                assertScopedNamespaces(
+                  introspection,
+                  requiredSchemas,
+                  allowedSchemas,
+                  pgService.name,
+                );
+                assertDependencyClosureTypes(
+                  introspection,
+                  catalogTypes,
+                  pgService.name,
+                );
+                return { pgService, introspection };
+              },
             );
 
             // Store the resolved state, so access during announcements doesn't cause the system to hang
@@ -834,21 +857,25 @@ function introspectPgServices(
       }
 
       // Do the introspection
-      const introspectionQuery = makeIntrospectionQuery();
+      const { query, requiredSchemas, allowedSchemas, catalogTypes } =
+        getIntrospectionQuery(pgService);
       const {
         rows: [row],
       } = await withPgClientFromPgService(
         pgService,
         pgService.pgSettingsForIntrospection ?? null,
-        (client) =>
-          client.query<{ introspection: string }>({
-            text: introspectionQuery,
-          }),
+        (client) => client.query<{ introspection: string }>(query),
       );
       if (!row) {
         throw new Error("Introspection failed");
       }
-      return { pgService, introspectionText: row.introspection };
+      return {
+        pgService,
+        introspectionText: row.introspection,
+        requiredSchemas,
+        allowedSchemas,
+        catalogTypes,
+      };
     }),
   );
 }
