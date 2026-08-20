@@ -25,6 +25,7 @@ import { parseIntrospectionResults } from "pg-introspection";
 
 import {
   assertDependencyClosureTypes,
+  assertScopedIntrospectionServices,
   assertScopedNamespaces,
   getIntrospectionQuery,
   type IntrospectionScope,
@@ -802,6 +803,8 @@ function introspectPgServices(
 ): Promise<RawIntrospectionResults> {
   const { withPgClientFromPgService } = info.lib.dataplanPg;
   const pgServices = info.resolvedPreset.pgServices;
+  const scopedIntrospection = info.options.pgScopedIntrospection;
+  assertScopedIntrospectionServices(pgServices, scopedIntrospection);
   if (!pgServices) {
     return Promise.resolve([]);
   }
@@ -858,7 +861,7 @@ function introspectPgServices(
 
       // Do the introspection
       const { query, requiredSchemas, allowedSchemas, catalogTypes } =
-        getIntrospectionQuery(pgService);
+        getIntrospectionQuery(pgService, scopedIntrospection?.[name]);
       const {
         rows: [row],
       } = await withPgClientFromPgService(

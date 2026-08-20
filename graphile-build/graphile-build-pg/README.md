@@ -18,29 +18,36 @@ flexible GraphQL schema.
 
 ## Schema-scoped introspection
 
-PostgreSQL services can opt into schema-scoped introspection. With no scoped
-options, `PgIntrospectionPlugin` continues to use the full catalog query.
+PostgreSQL services can opt into schema-scoped introspection through gather
+options keyed by service name. Services without an entry continue to use the
+full catalog query.
 
 ```ts
-const service = Object.assign(
-  makePgService({
-    connectionString: process.env.DATABASE_URL,
-    schemas: ["app_public"],
-  }),
-  {
-    scopedIntrospection: true,
-    introspectionAllowedDependencySchemas: ["app_private"],
-    introspectionScopedCatalogTypes: "dependency-closure" as const,
-    introspectionCapabilityExtensions: ["pg_trgm"],
+const preset = {
+  pgServices: [
+    makePgService({
+      name: "main",
+      connectionString: process.env.DATABASE_URL,
+      schemas: ["app_public"],
+    }),
+  ],
+  gather: {
+    pgScopedIntrospection: {
+      main: {
+        allowedDependencySchemas: ["app_private"],
+        catalogTypes: "dependency-closure" as const,
+        capabilityExtensions: ["pg_trgm"],
+      },
+    },
   },
-);
+};
 ```
 
 The service's `schemas` are the roots of the introspection query. Referenced
 objects in other schemas are retained only when those schemas are listed in
-`introspectionAllowedDependencySchemas`; an unapproved crossing fails schema
-construction. Scoped-only options without `scopedIntrospection` also fail rather
-than being silently ignored.
+`allowedDependencySchemas`; an unapproved crossing fails schema construction.
+Configuration for an unknown service name also fails rather than being silently
+ignored.
 
 If you don't want to use your database introspection results to generate the
 schema, you can instead build the registry yourself giving you full control over

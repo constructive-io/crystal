@@ -5,27 +5,31 @@ import {
 } from "pg-introspection";
 
 declare global {
-  namespace GraphileConfig {
-    interface PgServiceConfiguration {
-      /** Use an introspection query scoped to this service's schemas. */
-      scopedIntrospection?: boolean;
-
+  namespace GraphileBuild {
+    interface GatherOptions {
       /**
-       * Schemas that scoped introspection may retain when objects in the
-       * service schemas depend on them.
+       * Schema-scoped introspection options keyed by PostgreSQL service name.
+       * Services without an entry continue to use stock introspection.
        */
-      introspectionAllowedDependencySchemas?: readonly string[];
-
-      /** Controls how many `pg_catalog` types scoped introspection retains. */
-      introspectionScopedCatalogTypes?: ScopedCatalogTypes;
-
-      /**
-       * Extensions whose metadata should be retained even if no scoped object
-       * directly depends on them.
-       */
-      introspectionCapabilityExtensions?: readonly string[];
+      pgScopedIntrospection?: Readonly<
+        Record<string, PgScopedIntrospectionOptions>
+      >;
     }
   }
+}
+
+export interface PgScopedIntrospectionOptions {
+  /** Schemas that the dependency closure may cross into. */
+  allowedDependencySchemas?: readonly string[];
+
+  /** Controls how many `pg_catalog` types scoped introspection retains. */
+  catalogTypes?: ScopedCatalogTypes;
+
+  /**
+   * Extensions whose metadata should be retained even if no scoped object
+   * directly depends on them.
+   */
+  capabilityExtensions?: readonly string[];
 }
 
 export interface IntrospectionScope {
@@ -40,32 +44,9 @@ export interface IntrospectionQueryPlan extends IntrospectionScope {
 
 export function getIntrospectionQuery(
   pgService: GraphileConfig.PgServiceConfiguration,
+  options?: PgScopedIntrospectionOptions,
 ): IntrospectionQueryPlan {
-  const configuredCatalogTypes = pgService.introspectionScopedCatalogTypes;
-  const configuredCapabilityExtensions =
-    pgService.introspectionCapabilityExtensions;
-  const configuredDependencySchemas =
-    pgService.introspectionAllowedDependencySchemas;
-
-  if (!pgService.scopedIntrospection) {
-    const configuredScopedOptions = [
-      configuredCatalogTypes !== undefined
-        ? "introspectionScopedCatalogTypes"
-        : null,
-      configuredDependencySchemas !== undefined
-        ? "introspectionAllowedDependencySchemas"
-        : null,
-      configuredCapabilityExtensions !== undefined
-        ? "introspectionCapabilityExtensions"
-        : null,
-    ].filter((option): option is string => option !== null);
-    if (configuredScopedOptions.length > 0) {
-      throw new Error(
-        `Scoped introspection option(s) ${configuredScopedOptions.join(
-          ", ",
-        )} require scopedIntrospection for service '${pgService.name}'`,
-      );
-    }
+  if (!options) {
     return {
       query: { text: makeIntrospectionQuery() },
       requiredSchemas: null,
@@ -75,14 +56,14 @@ export function getIntrospectionQuery(
   }
 
   const requiredSchemas = pgService.schemas ?? [];
-  const dependencySchemas = configuredDependencySchemas ?? [];
+  const dependencySchemas = options.allowedDependencySchemas ?? [];
   assertAllowedDependencySchemas(dependencySchemas);
-  const catalogTypes = configuredCatalogTypes ?? "all";
+  const catalogTypes = options.catalogTypes ?? "all";
 
   return {
     query: makeSchemaScopedIntrospectionQuery(requiredSchemas, {
       catalogTypes,
-      capabilityExtensions: configuredCapabilityExtensions ?? [],
+      capabilityExtensions: options.capabilityExtensions ?? [],
     }),
     requiredSchemas,
     allowedSchemas: [
@@ -90,6 +71,27 @@ export function getIntrospectionQuery(
     ],
     catalogTypes,
   };
+}
+
+export function assertScopedIntrospectionServices(
+  pgServices: ReadonlyArray<GraphileConfig.PgServiceConfiguration> | undefined,
+  options: GraphileBuild.GatherOptions["pgScopedIntrospection"],
+): void {
+  if (!options) return;
+
+  const serviceNames = new Set(
+    (pgServices ?? []).map((pgService) => pgService.name),
+  );
+  const unknownServiceNames = Object.keys(options).filter(
+    (serviceName) => !serviceNames.has(serviceName),
+  );
+  if (unknownServiceNames.length > 0) {
+    throw new Error(
+      `Schema-scoped introspection configured for unknown PostgreSQL service(s): ${unknownServiceNames.join(
+        ", ",
+      )}`,
+    );
+  }
 }
 
 export function assertAllowedDependencySchemas(
