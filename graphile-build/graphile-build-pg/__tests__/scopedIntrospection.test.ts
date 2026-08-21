@@ -15,8 +15,8 @@ const makeService = (
   }) as GraphileConfig.PgServiceConfiguration;
 
 describe("scoped introspection service configuration", () => {
-  it("uses stock introspection unless explicitly enabled", () => {
-    const plan = getIntrospectionQuery(makeService());
+  it.each([undefined, false])("uses stock introspection for %p", (config) => {
+    const plan = getIntrospectionQuery(makeService(), config);
 
     expect(plan).toEqual({
       query: { text: makeIntrospectionQuery() },
@@ -24,6 +24,15 @@ describe("scoped introspection service configuration", () => {
       allowedSchemas: null,
       catalogTypes: null,
     });
+  });
+
+  it("uses scoped introspection defaults for true", () => {
+    const plan = getIntrospectionQuery(makeService(), true);
+
+    expect(plan.query.values).toEqual([["app_public"], []]);
+    expect(plan.requiredSchemas).toEqual(["app_public"]);
+    expect(plan.allowedSchemas).toEqual(["app_public", "pg_catalog"]);
+    expect(plan.catalogTypes).toBe("all");
   });
 
   it("builds a scoped, parameterized query from the service schemas", () => {

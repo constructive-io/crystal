@@ -19,8 +19,22 @@ flexible GraphQL schema.
 ## Schema-scoped introspection
 
 PostgreSQL services can opt into schema-scoped introspection through gather
-options keyed by service name. Services without an entry continue to use the
-full catalog query.
+options keyed by service name. Use `true` to enable it with defaults, `false` to
+explicitly disable it, or an options object to customize it. Services without an
+entry continue to use the full catalog query.
+
+```ts
+const preset = {
+  // ...
+  gather: {
+    pgScopedIntrospection: {
+      main: true,
+    },
+  },
+};
+```
+
+For advanced configuration:
 
 ```ts
 const preset = {

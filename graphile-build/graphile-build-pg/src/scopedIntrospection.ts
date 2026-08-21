@@ -9,10 +9,11 @@ declare global {
     interface GatherOptions {
       /**
        * Schema-scoped introspection options keyed by PostgreSQL service name.
+       * `true` enables defaults, `false` disables, and an object customizes it.
        * Services without an entry continue to use stock introspection.
        */
       pgScopedIntrospection?: Readonly<
-        Record<string, PgScopedIntrospectionOptions>
+        Record<string, PgScopedIntrospectionServiceConfig>
       >;
     }
   }
@@ -32,6 +33,10 @@ export interface PgScopedIntrospectionOptions {
   capabilityExtensions?: readonly string[];
 }
 
+export type PgScopedIntrospectionServiceConfig =
+  | boolean
+  | PgScopedIntrospectionOptions;
+
 export interface IntrospectionScope {
   requiredSchemas: readonly string[] | null;
   allowedSchemas: readonly string[] | null;
@@ -44,9 +49,9 @@ export interface IntrospectionQueryPlan extends IntrospectionScope {
 
 export function getIntrospectionQuery(
   pgService: GraphileConfig.PgServiceConfiguration,
-  options?: PgScopedIntrospectionOptions,
+  config?: PgScopedIntrospectionServiceConfig,
 ): IntrospectionQueryPlan {
-  if (!options) {
+  if (!config) {
     return {
       query: { text: makeIntrospectionQuery() },
       requiredSchemas: null,
@@ -54,6 +59,8 @@ export function getIntrospectionQuery(
       catalogTypes: null,
     };
   }
+
+  const options = config === true ? {} : config;
 
   const requiredSchemas = pgService.schemas ?? [];
   const dependencySchemas = options.allowedDependencySchemas ?? [];
