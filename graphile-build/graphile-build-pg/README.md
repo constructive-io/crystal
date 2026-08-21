@@ -48,7 +48,6 @@ const preset = {
   gather: {
     pgScopedIntrospection: {
       main: {
-        allowedDependencySchemas: ["app_private"],
         catalogTypes: "dependency-closure" as const,
         capabilityExtensions: ["pg_trgm"],
       },
@@ -58,10 +57,16 @@ const preset = {
 ```
 
 The service's `schemas` are the roots of the introspection query. Referenced
-objects in other schemas are retained only when those schemas are listed in
-`allowedDependencySchemas`; an unapproved crossing fails schema construction.
-Configuration for an unknown service name also fails rather than being silently
-ignored.
+objects in other schemas are discovered and retained automatically, while
+unrelated objects are excluded. Configuration for an unknown service name fails
+rather than being silently ignored.
+
+Extensions required by retained objects, such as the operator class behind a
+`pg_trgm` index, are discovered automatically. `capabilityExtensions` is for a
+different case: it retains lightweight metadata proving that an extension is
+installed even when no retained object directly depends on it. For example, a
+plugin can check for `pg_trgm` before exposing an optional search capability. It
+does not install the extension or retain every object owned by it.
 
 If you don't want to use your database introspection results to generate the
 schema, you can instead build the registry yourself giving you full control over

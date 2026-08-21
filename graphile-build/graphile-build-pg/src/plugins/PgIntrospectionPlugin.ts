@@ -549,7 +549,6 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
                 pgService,
                 introspectionText,
                 requiredSchemas,
-                allowedSchemas,
                 catalogTypes,
               }) => {
                 // IMPORTANT: parseIntrospectionResults must NOT be cached, because other plugins mutate it.
@@ -558,7 +557,6 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
                 assertScopedNamespaces(
                   introspection,
                   requiredSchemas,
-                  allowedSchemas,
                   pgService.name,
                 );
                 assertDependencyClosureTypes(
@@ -860,8 +858,10 @@ function introspectPgServices(
       }
 
       // Do the introspection
-      const { query, requiredSchemas, allowedSchemas, catalogTypes } =
-        getIntrospectionQuery(pgService, scopedIntrospection?.[name]);
+      const { query, requiredSchemas, catalogTypes } = getIntrospectionQuery(
+        pgService,
+        scopedIntrospection?.[name],
+      );
       const {
         rows: [row],
       } = await withPgClientFromPgService(
@@ -876,7 +876,6 @@ function introspectPgServices(
         pgService,
         introspectionText: row.introspection,
         requiredSchemas,
-        allowedSchemas,
         catalogTypes,
       };
     }),

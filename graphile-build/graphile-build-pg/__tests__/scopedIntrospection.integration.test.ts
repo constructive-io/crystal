@@ -53,7 +53,6 @@ const makeCapturePlugin = (
 const buildSchema = async (
   pool: Pool,
   scoped: boolean,
-  allowedDependencySchemas: readonly string[] = [],
   rootSchema = ROOT_SCHEMA,
 ): Promise<SchemaBuild> => {
   let introspection: Introspection | undefined;
@@ -72,7 +71,6 @@ const buildSchema = async (
             gather: {
               pgScopedIntrospection: {
                 [service.name]: {
-                  allowedDependencySchemas,
                   catalogTypes: "dependency-closure" as const,
                   capabilityExtensions: ["pg_trgm"],
                 },
@@ -119,10 +117,7 @@ describe("schema-scoped PostgreSQL introspection", () => {
     );
     await pool.query(fixture);
     stock = await buildSchema(pool, false);
-    scoped = await buildSchema(pool, true, [
-      DEPENDENCY_SCHEMA,
-      EXTENSION_SCHEMA,
-    ]);
+    scoped = await buildSchema(pool, true);
   }, 120_000);
 
   afterAll(async () => {
@@ -274,7 +269,6 @@ describe("schema-scoped PostgreSQL introspection", () => {
     const capabilityOnly = await buildSchema(
       pool,
       true,
-      [EXTENSION_SCHEMA],
       CAPABILITY_ROOT_SCHEMA,
     );
 
@@ -288,11 +282,5 @@ describe("schema-scoped PostgreSQL introspection", () => {
         index.getIndexClass()?.relname.includes("trgm"),
       ),
     ).toBe(false);
-  });
-
-  it("fails closed on an unapproved dependency schema", async () => {
-    await expect(buildSchema(pool, true, [EXTENSION_SCHEMA])).rejects.toThrow(
-      `crossed into unapproved dependency schema(s): ${DEPENDENCY_SCHEMA}`,
-    );
   });
 });

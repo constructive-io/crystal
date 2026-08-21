@@ -20,9 +20,6 @@ declare global {
 }
 
 export interface PgScopedIntrospectionOptions {
-  /** Schemas that the dependency closure may cross into. */
-  allowedDependencySchemas?: readonly string[];
-
   /** Controls how many `pg_catalog` types scoped introspection retains. */
   catalogTypes?: ScopedCatalogTypes;
 
@@ -39,7 +36,6 @@ export type PgScopedIntrospectionServiceConfig =
 
 export interface IntrospectionScope {
   requiredSchemas: readonly string[] | null;
-  allowedSchemas: readonly string[] | null;
   catalogTypes: ScopedCatalogTypes | null;
 }
 
@@ -55,7 +51,6 @@ export function getIntrospectionQuery(
     return {
       query: { text: makeIntrospectionQuery() },
       requiredSchemas: null,
-      allowedSchemas: null,
       catalogTypes: null,
     };
   }
@@ -63,8 +58,6 @@ export function getIntrospectionQuery(
   const options = config === true ? {} : config;
 
   const requiredSchemas = pgService.schemas ?? [];
-  const dependencySchemas = options.allowedDependencySchemas ?? [];
-  assertAllowedDependencySchemas(dependencySchemas);
   const catalogTypes = options.catalogTypes ?? "all";
 
   return {
@@ -73,9 +66,6 @@ export function getIntrospectionQuery(
       capabilityExtensions: options.capabilityExtensions ?? [],
     }),
     requiredSchemas,
-    allowedSchemas: [
-      ...new Set([...requiredSchemas, ...dependencySchemas, "pg_catalog"]),
-    ],
     catalogTypes,
   };
 }
@@ -101,35 +91,12 @@ export function assertScopedIntrospectionServices(
   }
 }
 
-export function assertAllowedDependencySchemas(
-  schemas: readonly string[],
-): void {
-  for (const schema of schemas) {
-    if (schema.length === 0 || schema.trim() !== schema) {
-      throw new Error(
-        "Introspection dependency schemas must contain exact non-empty schema names",
-      );
-    }
-    if (schema === "information_schema" || schema.startsWith("pg_")) {
-      throw new Error(
-        `Introspection dependency schema '${schema}' must not be a system schema`,
-      );
-    }
-    if (schema.includes("\0")) {
-      throw new Error(
-        "Introspection dependency schemas must not contain NUL bytes",
-      );
-    }
-  }
-}
-
 export function assertScopedNamespaces(
   introspection: Introspection,
   requiredSchemas: readonly string[] | null,
-  allowedSchemas: readonly string[] | null,
   serviceName: string,
 ): void {
-  if (requiredSchemas === null || allowedSchemas === null) return;
+  if (requiredSchemas === null) return;
 
   const found = new Set(
     introspection.namespaces.map((namespace) => namespace.nspname),
@@ -138,15 +105,6 @@ export function assertScopedNamespaces(
   if (missing.length > 0) {
     throw new Error(
       `Schema-scoped introspection for service '${serviceName}' did not find required schema(s): ${missing.join(
-        ", ",
-      )}`,
-    );
-  }
-  const allowed = new Set(allowedSchemas);
-  const unexpected = [...found].filter((schema) => !allowed.has(schema));
-  if (unexpected.length > 0) {
-    throw new Error(
-      `Schema-scoped introspection for service '${serviceName}' crossed into unapproved dependency schema(s): ${unexpected.join(
         ", ",
       )}`,
     );
