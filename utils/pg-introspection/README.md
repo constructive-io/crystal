@@ -88,9 +88,14 @@ const introspection = parseIntrospectionResults(rows[0].introspection);
 Schema and extension names are passed as query parameters. The dependency
 closure includes referenced relations, constraints, function signature types,
 domains, arrays, ranges, multiranges, indexes, inheritance parents, and
-extension metadata required by retained indexes. Dependencies may cross schema
-boundaries; callers that use schema boundaries as a trust boundary should
-validate the namespaces in the parsed result.
+extension metadata required by retained indexes. Dependencies cross schema
+boundaries automatically when a retained object needs them; unrelated objects
+are excluded.
+
+Extensions required by retained objects are also discovered automatically. Use
+`capabilityExtensions` for extensions whose metadata is needed as an explicit
+capability even when no retained object currently depends on it. This retains
+the extension record, not every object owned by the extension.
 
 ## Accessors
 

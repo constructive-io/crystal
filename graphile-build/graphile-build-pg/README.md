@@ -16,6 +16,60 @@ creates the relevant GraphQL types, fields, and [grafast][] plan resolver
 functions. The result is a high-performance, powerful, auto-generated but highly
 flexible GraphQL schema.
 
+## Schema-scoped introspection
+
+`PgScopedIntrospectionPlugin` uses the `pgIntrospection_query` gather hook to
+replace the stock query for configured PostgreSQL services. The plugin is not in
+the default preset; install its preset explicitly:
+
+```ts
+import { PgScopedIntrospectionPreset } from "graphile-build-pg";
+
+const preset = {
+  extends: [PgScopedIntrospectionPreset],
+  gather: {
+    pgScopedIntrospection: {
+      main: true,
+    },
+  },
+};
+```
+
+Use `false` to explicitly keep stock introspection, or an options object for
+advanced configuration:
+
+```ts
+const preset = {
+  extends: [PgScopedIntrospectionPreset],
+  pgServices: [
+    makePgService({
+      name: "main",
+      connectionString: process.env.DATABASE_URL,
+      schemas: ["app_public"],
+    }),
+  ],
+  gather: {
+    pgScopedIntrospection: {
+      main: {
+        catalogTypes: "dependency-closure" as const,
+        capabilityExtensions: ["pg_trgm"],
+      },
+    },
+  },
+};
+```
+
+The service's `schemas` are the roots of the introspection query. Referenced
+objects in other schemas are discovered and retained automatically, while
+unrelated objects are excluded. Configuration for an unknown service name fails
+rather than being silently ignored.
+
+Extensions required by retained objects, such as the operator class behind a
+`pg_trgm` index, are discovered automatically. `capabilityExtensions` retains
+lightweight installation metadata for extensions that no retained object
+directly depends on; it does not install the extension or retain every object
+owned by it.
+
 If you don't want to use your database introspection results to generate the
 schema, you can instead build the registry yourself giving you full control over
 what goes into your GraphQL API whilst still saving you significant effort

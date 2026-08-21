@@ -18,7 +18,10 @@ export { PgFakeConstraintsPlugin } from "./plugins/PgFakeConstraintsPlugin.ts";
 export { PgFirstLastBeforeAfterArgsPlugin } from "./plugins/PgFirstLastBeforeAfterArgsPlugin.ts";
 export { PgIndexBehaviorsPlugin } from "./plugins/PgIndexBehaviorsPlugin.ts";
 export { PgInterfaceModeUnionAllRowsPlugin } from "./plugins/PgInterfaceModeUnionAllRowsPlugin.ts";
-export { PgIntrospectionPlugin } from "./plugins/PgIntrospectionPlugin.ts";
+export {
+  PgIntrospectionPlugin,
+  type PgIntrospectionQuery,
+} from "./plugins/PgIntrospectionPlugin.ts";
 export { PgJWTPlugin } from "./plugins/PgJWTPlugin.ts";
 export { PgLtreePlugin } from "./plugins/PgLtreePlugin.ts";
 export { PgMutationCreatePlugin } from "./plugins/PgMutationCreatePlugin.ts";
@@ -38,6 +41,12 @@ export { PgRegistryReductionPlugin } from "./plugins/PgRegistryReductionPlugin.t
 export { PgRelationsPlugin } from "./plugins/PgRelationsPlugin.ts";
 export { PgRemoveExtensionResourcesPlugin } from "./plugins/PgRemoveExtensionResourcesPlugin.ts";
 export { PgRowByUniquePlugin } from "./plugins/PgRowByUniquePlugin.ts";
+export {
+  type PgScopedIntrospectionOptions,
+  PgScopedIntrospectionPlugin,
+  PgScopedIntrospectionPreset,
+  type PgScopedIntrospectionServiceConfig,
+} from "./plugins/PgScopedIntrospectionPlugin.ts";
 export { PgTableNodePlugin } from "./plugins/PgTableNodePlugin.ts";
 export { PgTablesPlugin } from "./plugins/PgTablesPlugin.ts";
 export { PgTypesPlugin } from "./plugins/PgTypesPlugin.ts";
