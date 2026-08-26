@@ -1,3 +1,4 @@
+import type { Introspection } from "./index.ts";
 import { buildIntrospectionQuery } from "./introspection.ts";
 
 export type ScopedCatalogTypes = "all" | "dependency-closure";
@@ -10,6 +11,17 @@ export interface SchemaScopedIntrospectionOptions {
 export interface SchemaScopedIntrospectionQuery {
   text: string;
   values: [string[], string[]];
+}
+
+export interface SchemaScopedIntrospectionScope {
+  schemas: readonly string[];
+  catalogTypes: ScopedCatalogTypes;
+  capabilityExtensions: readonly string[];
+}
+
+export interface SchemaScopedIntrospectionPlan {
+  query: SchemaScopedIntrospectionQuery;
+  scope: SchemaScopedIntrospectionScope;
 }
 
 const SCOPED_CTES = `recursive
@@ -341,10 +353,10 @@ const SCOPED_CTES = `recursive
  * Builds a parameterized introspection query scoped to the requested schemas
  * and the transitive object dependencies required by their objects.
  */
-export const makeSchemaScopedIntrospectionQuery = (
+export const makeSchemaScopedIntrospectionPlan = (
   schemas: readonly string[],
   options: SchemaScopedIntrospectionOptions = {},
-): SchemaScopedIntrospectionQuery => {
+): SchemaScopedIntrospectionPlan => {
   if (schemas.length === 0) {
     throw new Error("Schema-scoped introspection requires at least one schema");
   }
@@ -390,7 +402,7 @@ export const makeSchemaScopedIntrospectionQuery = (
   );
   const dependencyClosureTypePredicate =
     "pg_type.oid = any (array(select object_id from object_closure where object_class = 'pg_catalog.pg_type'::regclass))";
-  return {
+  const query: SchemaScopedIntrospectionQuery = {
     text: buildIntrospectionQuery({
       ctes: SCOPED_CTES,
       namespacePredicate:
@@ -410,4 +422,131 @@ export const makeSchemaScopedIntrospectionQuery = (
     }),
     values: [normalized, normalizedCapabilityExtensions],
   };
+  return {
+    query,
+    scope: {
+      schemas: normalized,
+      catalogTypes,
+      capabilityExtensions: normalizedCapabilityExtensions,
+    },
+  };
 };
+
+/**
+ * Builds only the query portion of a schema-scoped introspection plan.
+ *
+ * Prefer `makeSchemaScopedIntrospectionPlan()` when the results will be parsed
+ * and validated by this package.
+ */
+export const makeSchemaScopedIntrospectionQuery = (
+  schemas: readonly string[],
+  options: SchemaScopedIntrospectionOptions = {},
+): SchemaScopedIntrospectionQuery =>
+  makeSchemaScopedIntrospectionPlan(schemas, options).query;
+
+function assertScopedNamespaces(
+  introspection: Introspection,
+  requiredSchemas: readonly string[],
+): void {
+  const found = new Set(
+    introspection.namespaces.map((namespace) => namespace.nspname),
+  );
+  const missing = requiredSchemas.filter((schema) => !found.has(schema));
+  if (missing.length > 0) {
+    throw new Error(
+      `Schema-scoped introspection did not find required schema(s): ${missing.join(
+        ", ",
+      )}`,
+    );
+  }
+}
+
+function assertDependencyClosureTypes(introspection: Introspection): void {
+  const retainedTypeOids = new Set(introspection.types.map((type) => type._id));
+  const requireType = (
+    oid: string | null | undefined,
+    objectKind: string,
+    objectContext: string,
+    field: string,
+  ): void => {
+    if (oid === null || oid === undefined || oid === "0") return;
+    // Extension-owned composite resources are removed from the public arrays
+    // after lookup hydration; the lookup remains available to consumers.
+    const resolves =
+      retainedTypeOids.has(oid) || introspection._lookups.typeById.has(oid);
+    if (!resolves) {
+      throw new Error(
+        `Dependency-closure introspection retained ${objectKind} '${objectContext}' field '${field}' referencing missing pg_type OID '${oid}'`,
+      );
+    }
+  };
+  const requireTypes = (
+    oids: readonly string[] | null | undefined,
+    objectKind: string,
+    objectContext: string,
+    field: string,
+  ): void => {
+    for (const oid of oids ?? []) {
+      requireType(oid, objectKind, objectContext, field);
+    }
+  };
+
+  for (const entity of introspection.classes) {
+    const context = `${entity.relname} (${entity._id})`;
+    requireType(entity.reltype, "pg_class", context, "reltype");
+    requireType(entity.reloftype, "pg_class", context, "reloftype");
+  }
+  for (const entity of introspection.attributes) {
+    requireType(
+      entity.atttypid,
+      "pg_attribute",
+      `${entity.attrelid}.${entity.attname}`,
+      "atttypid",
+    );
+  }
+  for (const entity of introspection.constraints) {
+    requireType(
+      entity.contypid,
+      "pg_constraint",
+      `${entity.conname} (${entity._id})`,
+      "contypid",
+    );
+  }
+  for (const entity of introspection.procs) {
+    const context = `${entity.proname} (${entity._id})`;
+    requireType(entity.prorettype, "pg_proc", context, "prorettype");
+    requireTypes(entity.proargtypes, "pg_proc", context, "proargtypes");
+    requireTypes(entity.proallargtypes, "pg_proc", context, "proallargtypes");
+  }
+  for (const entity of introspection.types) {
+    const context = `${entity.typname} (${entity._id})`;
+    requireType(entity.typbasetype, "pg_type", context, "typbasetype");
+    requireType(entity.typelem, "pg_type", context, "typelem");
+    requireType(entity.typarray, "pg_type", context, "typarray");
+  }
+  for (const entity of introspection.enums) {
+    requireType(
+      entity.enumtypid,
+      "pg_enum",
+      `${entity.enumlabel} (${entity._id})`,
+      "enumtypid",
+    );
+  }
+  for (const entity of introspection.ranges) {
+    const context = `range ${entity.rngtypid ?? "unknown"}`;
+    requireType(entity.rngtypid, "pg_range", context, "rngtypid");
+    requireType(entity.rngsubtype, "pg_range", context, "rngsubtype");
+    requireType(entity.rngmultitypid, "pg_range", context, "rngmultitypid");
+  }
+}
+
+/** Validates that an introspection result satisfies its scoped query plan. */
+export function validateSchemaScopedIntrospection(
+  introspection: Introspection,
+  plan: SchemaScopedIntrospectionPlan,
+): void {
+  assertScopedNamespaces(introspection, plan.scope.schemas);
+  if (plan.scope.catalogTypes === "dependency-closure") {
+    assertDependencyClosureTypes(introspection);
+  }
+}
