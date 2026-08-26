@@ -1,5 +1,11 @@
-import type { Introspection, ScopedCatalogTypes } from "pg-introspection";
-import { makeSchemaScopedIntrospectionQuery } from "pg-introspection";
+import type {
+  SchemaScopedIntrospectionOptions,
+  SchemaScopedIntrospectionPlan,
+} from "pg-introspection";
+import {
+  makeSchemaScopedIntrospectionPlan,
+  validateSchemaScopedIntrospection,
+} from "pg-introspection";
 
 import { version } from "../version.ts";
 
@@ -24,16 +30,7 @@ declare global {
   }
 }
 
-export interface PgScopedIntrospectionOptions {
-  /** Controls how many `pg_catalog` types scoped introspection retains. */
-  catalogTypes?: ScopedCatalogTypes;
-
-  /**
-   * Extensions whose metadata should be retained even if no scoped object
-   * directly depends on them.
-   */
-  capabilityExtensions?: readonly string[];
-}
+export type PgScopedIntrospectionOptions = SchemaScopedIntrospectionOptions;
 
 export type PgScopedIntrospectionServiceConfig =
   | boolean
@@ -45,6 +42,8 @@ function getOptions(
   if (!config) return null;
   return config === true ? {} : config;
 }
+
+const plansByQuery = new WeakMap<object, SchemaScopedIntrospectionPlan>();
 
 function assertScopedIntrospectionServices(
   pgServices: ReadonlyArray<GraphileConfig.PgServiceConfiguration> | undefined,
@@ -64,111 +63,6 @@ function assertScopedIntrospectionServices(
         ", ",
       )}`,
     );
-  }
-}
-
-function assertScopedNamespaces(
-  introspection: Introspection,
-  requiredSchemas: readonly string[],
-  serviceName: string,
-): void {
-  const found = new Set(
-    introspection.namespaces.map((namespace) => namespace.nspname),
-  );
-  const missing = requiredSchemas.filter((schema) => !found.has(schema));
-  if (missing.length > 0) {
-    throw new Error(
-      `Schema-scoped introspection for service '${serviceName}' did not find required schema(s): ${missing.join(
-        ", ",
-      )}`,
-    );
-  }
-}
-
-function assertDependencyClosureTypes(
-  introspection: Introspection,
-  serviceName: string,
-): void {
-  const retainedTypeOids = new Set(introspection.types.map((type) => type._id));
-  const requireType = (
-    oid: string | null | undefined,
-    objectKind: string,
-    objectContext: string,
-    field: string,
-  ): void => {
-    if (oid === null || oid === undefined || oid === "0") return;
-    // Extension-owned composite resources are removed from the public arrays
-    // after lookup hydration; the lookup remains available to consumers.
-    const introspectionLookups = (
-      introspection as Introspection & {
-        _lookups: { typeById: Map<string, unknown> };
-      }
-    )._lookups;
-    const resolves =
-      retainedTypeOids.has(oid) || introspectionLookups.typeById.has(oid);
-    if (!resolves) {
-      throw new Error(
-        `Dependency-closure introspection for service '${serviceName}' retained ${objectKind} '${objectContext}' field '${field}' referencing missing pg_type OID '${oid}'`,
-      );
-    }
-  };
-  const requireTypes = (
-    oids: readonly string[] | null | undefined,
-    objectKind: string,
-    objectContext: string,
-    field: string,
-  ): void => {
-    for (const oid of oids ?? []) {
-      requireType(oid, objectKind, objectContext, field);
-    }
-  };
-
-  for (const entity of introspection.classes) {
-    const context = `${entity.relname} (${entity._id})`;
-    requireType(entity.reltype, "pg_class", context, "reltype");
-    requireType(entity.reloftype, "pg_class", context, "reloftype");
-  }
-  for (const entity of introspection.attributes) {
-    requireType(
-      entity.atttypid,
-      "pg_attribute",
-      `${entity.attrelid}.${entity.attname}`,
-      "atttypid",
-    );
-  }
-  for (const entity of introspection.constraints) {
-    requireType(
-      entity.contypid,
-      "pg_constraint",
-      `${entity.conname} (${entity._id})`,
-      "contypid",
-    );
-  }
-  for (const entity of introspection.procs) {
-    const context = `${entity.proname} (${entity._id})`;
-    requireType(entity.prorettype, "pg_proc", context, "prorettype");
-    requireTypes(entity.proargtypes, "pg_proc", context, "proargtypes");
-    requireTypes(entity.proallargtypes, "pg_proc", context, "proallargtypes");
-  }
-  for (const entity of introspection.types) {
-    const context = `${entity.typname} (${entity._id})`;
-    requireType(entity.typbasetype, "pg_type", context, "typbasetype");
-    requireType(entity.typelem, "pg_type", context, "typelem");
-    requireType(entity.typarray, "pg_type", context, "typarray");
-  }
-  for (const entity of introspection.enums) {
-    requireType(
-      entity.enumtypid,
-      "pg_enum",
-      `${entity.enumlabel} (${entity._id})`,
-      "enumtypid",
-    );
-  }
-  for (const entity of introspection.ranges) {
-    const context = `range ${entity.rngtypid ?? "unknown"}`;
-    requireType(entity.rngtypid, "pg_range", context, "rngtypid");
-    requireType(entity.rngsubtype, "pg_range", context, "rngsubtype");
-    requireType(entity.rngmultitypid, "pg_range", context, "rngmultitypid");
   }
 }
 
@@ -195,36 +89,29 @@ export const PgScopedIntrospectionPlugin: GraphileConfig.Plugin = {
         );
         if (!options) return;
 
-        event.query = makeSchemaScopedIntrospectionQuery(
+        const plan = makeSchemaScopedIntrospectionPlan(
           event.pgService.schemas ?? [],
           {
             catalogTypes: options.catalogTypes,
             capabilityExtensions: options.capabilityExtensions,
           },
         );
+        plansByQuery.set(plan.query, plan);
+        event.query = plan.query;
       },
 
-      pgIntrospection_introspection(info, event) {
-        const options = getOptions(
-          info.options.pgScopedIntrospection?.[event.serviceName],
-        );
-        if (!options) return;
+      pgIntrospection_introspection(_info, event) {
+        const plan = plansByQuery.get(event.query);
+        if (!plan) return;
 
-        const pgService = info.resolvedPreset.pgServices?.find(
-          (service) => service.name === event.serviceName,
-        );
-        if (!pgService) {
+        try {
+          validateSchemaScopedIntrospection(event.introspection, plan);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
           throw new Error(
-            `Schema-scoped introspection could not find PostgreSQL service '${event.serviceName}'`,
+            `Schema-scoped introspection validation failed for PostgreSQL service '${event.serviceName}': ${message}`,
           );
-        }
-        assertScopedNamespaces(
-          event.introspection,
-          pgService.schemas ?? [],
-          event.serviceName,
-        );
-        if ((options.catalogTypes ?? "all") === "dependency-closure") {
-          assertDependencyClosureTypes(event.introspection, event.serviceName);
         }
       },
     },

@@ -92,6 +92,46 @@ describe("PostgreSQL introspection query hook", () => {
       captureIntrospectionQuery({ plugins: [ReplacementQueryPlugin] }),
     ).resolves.toEqual({ text: "select $1", values: ["replacement"] });
   });
+
+  it("runs hooks in plugin order and lets the last replacement win", async () => {
+    const calls: string[] = [];
+    const FirstReplacementPlugin: GraphileConfig.Plugin = {
+      name: "FirstReplacementPlugin",
+      gather: {
+        hooks: {
+          pgIntrospection_query(_info, event) {
+            calls.push("first");
+            event.query = { text: "select 'first'" };
+          },
+        },
+      },
+    };
+    const SecondReplacementPlugin: GraphileConfig.Plugin = {
+      name: "SecondReplacementPlugin",
+      gather: {
+        hooks: {
+          pgIntrospection_query(_info, event) {
+            calls.push("second");
+            expect(event.query.text).toBe("select 'first'");
+            event.query = { text: "select 'second'" };
+          },
+        },
+      },
+    };
+
+    await expect(
+      captureIntrospectionQuery({
+        plugins: [FirstReplacementPlugin, SecondReplacementPlugin],
+      }),
+    ).resolves.toEqual({ text: "select 'second'" });
+    expect(calls).toEqual(["first", "second"]);
+  });
+
+  it("ignores scoped configuration when the scoped plugin is not installed", async () => {
+    await expect(captureIntrospectionQuery({ config: true })).resolves.toEqual({
+      text: makeIntrospectionQuery(),
+    });
+  });
 });
 
 describe("PgScopedIntrospectionPlugin", () => {

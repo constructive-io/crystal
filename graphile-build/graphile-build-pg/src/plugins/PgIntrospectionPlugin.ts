@@ -183,6 +183,7 @@ declare global {
       }): PromiseOrDirect<void>;
       pgIntrospection_introspection(event: {
         introspection: Introspection;
+        query: PgIntrospectionQuery;
         serviceName: string;
       }): PromiseOrDirect<void>;
       pgIntrospection_namespace(event: {
@@ -252,6 +253,7 @@ declare global {
 type RawIntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
   introspectionText: string;
+  query: PgIntrospectionQuery;
 }>;
 type IntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
@@ -560,6 +562,12 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
 
             const rawIntrospections = await introspectionPromise;
 
+            const queryByServiceName = new Map(
+              rawIntrospections.map(({ pgService, query }) => [
+                pgService.name,
+                query,
+              ]),
+            );
             const introspections: IntrospectionResults = rawIntrospections.map(
               ({ pgService, introspectionText }) => ({
                 pgService,
@@ -621,6 +629,7 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
                 }
                 await info.process("pgIntrospection_introspection", {
                   introspection,
+                  query: queryByServiceName.get(pgService.name)!,
                   serviceName: pgService.name,
                 });
                 await announce("pgIntrospection_namespace", namespaces);
@@ -870,7 +879,11 @@ function introspectPgServices(
       if (!row) {
         throw new Error("Introspection failed");
       }
-      return { pgService, introspectionText: row.introspection };
+      return {
+        pgService,
+        introspectionText: row.introspection,
+        query: introspectionQuery,
+      };
     }),
   );
 }

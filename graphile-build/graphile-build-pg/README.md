@@ -70,6 +70,10 @@ lightweight installation metadata for extensions that no retained object
 directly depends on; it does not install the extension or retain every object
 owned by it.
 
+Introspection query hooks run in plugin order, so a later replacement wins. If
+`pgScopedIntrospection` is configured without installing the scoped plugin or
+preset, no plugin consumes the configuration and stock introspection is used.
+
 If you don't want to use your database introspection results to generate the
 schema, you can instead build the registry yourself giving you full control over
 what goes into your GraphQL API whilst still saving you significant effort
