@@ -20,17 +20,16 @@ import type {
   PgRange,
   PgRoles,
   PgType,
+  SchemaScopedIntrospectionOptions,
   SchemaScopedIntrospectionPlan,
 } from "pg-introspection";
 import {
+  makeIntrospectionQuery,
+  makeSchemaScopedIntrospectionPlan,
   parseIntrospectionResults,
   validateSchemaScopedIntrospection,
 } from "pg-introspection";
 
-import {
-  assertScopedIntrospectionServices,
-  getIntrospectionQuery,
-} from "../scopedIntrospection.ts";
 import { version } from "../version.ts";
 import { watchFixtures } from "../watchFixtures.ts";
 
@@ -53,6 +52,17 @@ export type PgEntityWithId =
   | PgIndex
   | PgLanguage;
 
+type PgScopedIntrospectionOptions = SchemaScopedIntrospectionOptions;
+
+type PgScopedIntrospectionServiceConfig =
+  | boolean
+  | PgScopedIntrospectionOptions;
+
+interface IntrospectionQueryPlan {
+  query: { text: string; values?: unknown[] };
+  scopedPlan: SchemaScopedIntrospectionPlan | null;
+}
+
 declare global {
   namespace GraphileBuild {
     interface GatherOptions {
@@ -62,6 +72,15 @@ declare global {
        * Default: true
        */
       installWatchFixtures?: boolean;
+
+      /**
+       * Schema-scoped introspection options keyed by PostgreSQL service name.
+       * `true` enables defaults, `false` disables, and an object customizes it.
+       * Services without an entry continue to use stock introspection.
+       */
+      pgScopedIntrospection?: Readonly<
+        Record<string, PgScopedIntrospectionServiceConfig>
+      >;
     }
   }
 
@@ -238,6 +257,50 @@ declare global {
         serviceName: string;
       }): PromiseOrDirect<void>;
     }
+  }
+}
+
+function getIntrospectionQuery(
+  pgService: GraphileConfig.PgServiceConfiguration,
+  config?: PgScopedIntrospectionServiceConfig,
+): IntrospectionQueryPlan {
+  if (!config) {
+    return {
+      query: { text: makeIntrospectionQuery() },
+      scopedPlan: null,
+    };
+  }
+
+  const options = config === true ? {} : config;
+  const scopedPlan = makeSchemaScopedIntrospectionPlan(
+    pgService.schemas ?? [],
+    options,
+  );
+
+  return {
+    query: scopedPlan.query,
+    scopedPlan,
+  };
+}
+
+function assertScopedIntrospectionServices(
+  pgServices: ReadonlyArray<GraphileConfig.PgServiceConfiguration> | undefined,
+  options: GraphileBuild.GatherOptions["pgScopedIntrospection"],
+): void {
+  if (!options) return;
+
+  const serviceNames = new Set(
+    (pgServices ?? []).map((pgService) => pgService.name),
+  );
+  const unknownServiceNames = Object.keys(options).filter(
+    (serviceName) => !serviceNames.has(serviceName),
+  );
+  if (unknownServiceNames.length > 0) {
+    throw new Error(
+      `Schema-scoped introspection configured for unknown PostgreSQL service(s): ${unknownServiceNames.join(
+        ", ",
+      )}`,
+    );
   }
 }
 
