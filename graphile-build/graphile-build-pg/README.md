@@ -61,6 +61,10 @@ objects in other schemas are discovered and retained automatically, while
 unrelated objects are excluded. Configuration for an unknown service name fails
 rather than being silently ignored.
 
+`pg-introspection` owns the scoped query plan and validates the parsed result
+against that same plan. `graphile-build-pg` only selects stock or scoped mode
+for each service, executes the query, and adds service context to errors.
+
 Extensions required by retained objects, such as the operator class behind a
 `pg_trgm` index, are discovered automatically. `capabilityExtensions` is for a
 different case: it retains lightweight metadata proving that an extension is

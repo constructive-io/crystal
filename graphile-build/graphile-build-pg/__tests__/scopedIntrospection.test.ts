@@ -20,8 +20,7 @@ describe("scoped introspection service configuration", () => {
 
     expect(plan).toEqual({
       query: { text: makeIntrospectionQuery() },
-      requiredSchemas: null,
-      catalogTypes: null,
+      scopedPlan: null,
     });
   });
 
@@ -29,8 +28,11 @@ describe("scoped introspection service configuration", () => {
     const plan = getIntrospectionQuery(makeService(), true);
 
     expect(plan.query.values).toEqual([["app_public"], []]);
-    expect(plan.requiredSchemas).toEqual(["app_public"]);
-    expect(plan.catalogTypes).toBe("all");
+    expect(plan.scopedPlan?.scope).toEqual({
+      schemas: ["app_public"],
+      catalogTypes: "all",
+      capabilityExtensions: [],
+    });
   });
 
   it("builds a scoped, parameterized query from the service schemas", () => {
@@ -40,8 +42,11 @@ describe("scoped introspection service configuration", () => {
     });
 
     expect(plan.query.values).toEqual([["app_public"], ["pg_trgm"]]);
-    expect(plan.requiredSchemas).toEqual(["app_public"]);
-    expect(plan.catalogTypes).toBe("dependency-closure");
+    expect(plan.scopedPlan?.scope).toEqual({
+      schemas: ["app_public"],
+      catalogTypes: "dependency-closure",
+      capabilityExtensions: ["pg_trgm"],
+    });
   });
 
   it("rejects configuration for an unknown PostgreSQL service", () => {

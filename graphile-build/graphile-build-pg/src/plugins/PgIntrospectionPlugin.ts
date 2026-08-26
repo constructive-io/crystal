@@ -20,15 +20,16 @@ import type {
   PgRange,
   PgRoles,
   PgType,
+  SchemaScopedIntrospectionPlan,
 } from "pg-introspection";
-import { parseIntrospectionResults } from "pg-introspection";
+import {
+  parseIntrospectionResults,
+  validateSchemaScopedIntrospection,
+} from "pg-introspection";
 
 import {
-  assertDependencyClosureTypes,
   assertScopedIntrospectionServices,
-  assertScopedNamespaces,
   getIntrospectionQuery,
-  type IntrospectionScope,
 } from "../scopedIntrospection.ts";
 import { version } from "../version.ts";
 import { watchFixtures } from "../watchFixtures.ts";
@@ -240,12 +241,11 @@ declare global {
   }
 }
 
-type RawIntrospectionResults = Array<
-  {
-    pgService: GraphileConfig.PgServiceConfiguration;
-    introspectionText: string;
-  } & IntrospectionScope
->;
+type RawIntrospectionResults = Array<{
+  pgService: GraphileConfig.PgServiceConfiguration;
+  introspectionText: string;
+  scopedPlan: SchemaScopedIntrospectionPlan | null;
+}>;
 type IntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
   introspection: Introspection;
@@ -545,25 +545,24 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
             const rawIntrospections = await introspectionPromise;
 
             const introspections: IntrospectionResults = rawIntrospections.map(
-              ({
-                pgService,
-                introspectionText,
-                requiredSchemas,
-                catalogTypes,
-              }) => {
+              ({ pgService, introspectionText, scopedPlan }) => {
                 // IMPORTANT: parseIntrospectionResults must NOT be cached, because other plugins mutate it.
                 const introspection =
                   parseIntrospectionResults(introspectionText);
-                assertScopedNamespaces(
-                  introspection,
-                  requiredSchemas,
-                  pgService.name,
-                );
-                assertDependencyClosureTypes(
-                  introspection,
-                  catalogTypes,
-                  pgService.name,
-                );
+                if (scopedPlan) {
+                  try {
+                    validateSchemaScopedIntrospection(
+                      introspection,
+                      scopedPlan,
+                    );
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    throw new Error(
+                      `Schema-scoped introspection validation failed for PostgreSQL service '${pgService.name}': ${message}`,
+                    );
+                  }
+                }
                 return { pgService, introspection };
               },
             );
@@ -858,7 +857,7 @@ function introspectPgServices(
       }
 
       // Do the introspection
-      const { query, requiredSchemas, catalogTypes } = getIntrospectionQuery(
+      const { query, scopedPlan } = getIntrospectionQuery(
         pgService,
         scopedIntrospection?.[name],
       );
@@ -875,8 +874,7 @@ function introspectPgServices(
       return {
         pgService,
         introspectionText: row.introspection,
-        requiredSchemas,
-        catalogTypes,
+        scopedPlan,
       };
     }),
   );

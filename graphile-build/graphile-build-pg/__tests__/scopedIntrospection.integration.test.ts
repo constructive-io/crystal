@@ -283,4 +283,10 @@ describe("schema-scoped PostgreSQL introspection", () => {
       ),
     ).toBe(false);
   });
+
+  it("fails fast when a configured root schema is missing", async () => {
+    await expect(buildSchema(pool, true, "scope_missing_root")).rejects.toThrow(
+      /validation failed.*did not find required schema\(s\): scope_missing_root/u,
+    );
+  });
 });
