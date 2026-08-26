@@ -73,16 +73,18 @@ dependencies:
 
 ```js
 import {
-  makeSchemaScopedIntrospectionQuery,
+  makeSchemaScopedIntrospectionPlan,
   parseIntrospectionResults,
+  validateSchemaScopedIntrospection,
 } from "pg-introspection";
 
-const query = makeSchemaScopedIntrospectionQuery(["app_public"], {
+const plan = makeSchemaScopedIntrospectionPlan(["app_public"], {
   catalogTypes: "dependency-closure",
   capabilityExtensions: ["pg_trgm"],
 });
-const { rows } = await pool.query(query);
+const { rows } = await pool.query(plan.query);
 const introspection = parseIntrospectionResults(rows[0].introspection);
+validateSchemaScopedIntrospection(introspection, plan);
 ```
 
 Schema and extension names are passed as query parameters. The dependency
