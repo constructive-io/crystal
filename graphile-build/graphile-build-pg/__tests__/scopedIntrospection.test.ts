@@ -14,12 +14,21 @@ type ServiceConfig = boolean | SchemaScopedIntrospectionOptions;
 
 async function captureIntrospectionQuery(
   configByService?: Readonly<Record<string, ServiceConfig>>,
+  {
+    serviceName = "main",
+    schemas = ["app_public"],
+    onQuery,
+  }: {
+    serviceName?: string;
+    schemas?: string[];
+    onQuery?: (query: IntrospectionQuery) => void;
+  } = {},
 ): Promise<IntrospectionQuery> {
   let capturedQuery: IntrospectionQuery | undefined;
   const queryCaptured = new Error("query captured");
   const pgService = {
-    name: "main",
-    schemas: ["app_public"],
+    name: serviceName,
+    schemas,
     withPgClientKey: "withPgClient",
     pgSettingsKey: "pgSettings",
     adaptorSettings: {},
@@ -31,6 +40,7 @@ async function captureIntrospectionQuery(
         ) =>
           callback({
             query(query: IntrospectionQuery) {
+              onQuery?.(query);
               capturedQuery = query;
               throw queryCaptured;
             },
@@ -104,4 +114,39 @@ describe("scoped introspection service configuration", () => {
       /unknown PostgreSQL service\(s\): analytics/u,
     );
   });
+
+  it.each([
+    {
+      schemas: [],
+      config: true,
+      reason: "Schema-scoped introspection requires at least one schema",
+    },
+    {
+      schemas: ["pg_catalog"],
+      config: true,
+      reason:
+        "Schema-scoped introspection cannot expose system schema 'pg_catalog'",
+    },
+    {
+      schemas: ["app_public"],
+      config: JSON.parse('{"catalogTypes":"dependancy-closure"}'),
+      reason:
+        'Schema-scoped introspection catalogTypes must be "all" or "dependency-closure"; received \'dependancy-closure\'',
+    },
+  ])(
+    "identifies the service when plan construction fails: $reason",
+    async ({ schemas, config, reason }) => {
+      const onQuery = jest.fn();
+      await expect(
+        captureIntrospectionQuery(
+          { analytics: config },
+          { serviceName: "analytics", schemas, onQuery },
+        ),
+      ).rejects.toMatchObject({
+        message: `Schema-scoped introspection plan construction failed for PostgreSQL service 'analytics': ${reason}`,
+        cause: expect.objectContaining({ message: reason }),
+      });
+      expect(onQuery).not.toHaveBeenCalled();
+    },
+  );
 });

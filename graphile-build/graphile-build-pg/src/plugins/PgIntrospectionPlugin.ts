@@ -272,10 +272,19 @@ function getIntrospectionQuery(
   }
 
   const options = config === true ? {} : config;
-  const scopedPlan = makeSchemaScopedIntrospectionPlan(
-    pgService.schemas ?? [],
-    options,
-  );
+  let scopedPlan: SchemaScopedIntrospectionPlan;
+  try {
+    scopedPlan = makeSchemaScopedIntrospectionPlan(
+      pgService.schemas ?? [],
+      options,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Schema-scoped introspection plan construction failed for PostgreSQL service '${pgService.name}': ${message}`,
+      { cause: error },
+    );
+  }
 
   return {
     query: scopedPlan.query,
