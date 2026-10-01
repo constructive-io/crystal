@@ -289,7 +289,7 @@ const SCOPED_CTES = `recursive
       inner join pg_catalog.pg_class retained_index
         on object_closure.object_class = 'pg_catalog.pg_class'::regclass
         and retained_index.oid = object_closure.object_id
-        and retained_index.relkind = 'i'
+        and retained_index.relkind in ('i', 'I')
       inner join pg_catalog.pg_depend
         on pg_depend.classid = 'pg_catalog.pg_am'::regclass
         and pg_depend.objid = retained_index.relam
@@ -360,7 +360,13 @@ export const makeSchemaScopedIntrospectionPlan = (
   if (schemas.length === 0) {
     throw new Error("Schema-scoped introspection requires at least one schema");
   }
-  const catalogTypes = options.catalogTypes ?? "all";
+  const catalogTypes =
+    options.catalogTypes === undefined ? "all" : options.catalogTypes;
+  if (catalogTypes !== "all" && catalogTypes !== "dependency-closure") {
+    throw new Error(
+      `Schema-scoped introspection catalogTypes must be "all" or "dependency-closure"; received '${String(catalogTypes)}'`,
+    );
+  }
   const capabilityExtensions = options.capabilityExtensions ?? [];
   const normalizedCapabilityExtensions = Array.from(
     new Set(
@@ -425,9 +431,9 @@ export const makeSchemaScopedIntrospectionPlan = (
   return {
     query,
     scope: {
-      schemas: normalized,
+      schemas: [...normalized],
       catalogTypes,
-      capabilityExtensions: normalizedCapabilityExtensions,
+      capabilityExtensions: [...normalizedCapabilityExtensions],
     },
   };
 };

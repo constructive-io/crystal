@@ -3,8 +3,33 @@ create schema scope_dependency;
 create schema scope_unrelated;
 create schema scope_extension;
 create schema scope_capability_root;
+create schema scope_partition_root;
 
 create extension pg_trgm with schema scope_extension;
+
+-- Only the access method belongs to plpgsql; support objects are standalone.
+-- There are no partitions, so this parent index has no physical child index.
+create access method scope_partition_btree
+  type index
+  handler pg_catalog.bthandler;
+
+alter extension plpgsql add access method scope_partition_btree;
+
+create operator class scope_partition_root.scope_partition_int4_ops
+  for type integer using scope_partition_btree as
+  operator 1 < (integer, integer),
+  operator 2 <= (integer, integer),
+  operator 3 = (integer, integer),
+  operator 4 >= (integer, integer),
+  operator 5 > (integer, integer),
+  function 1 pg_catalog.btint4cmp(integer, integer);
+
+create table scope_partition_root.partitioned_items (
+  id integer not null
+) partition by range (id);
+
+create index partitioned_items_idx on only scope_partition_root.partitioned_items
+  using scope_partition_btree (id scope_partition_root.scope_partition_int4_ops);
 
 create type scope_dependency.item_status as enum (
   'draft',

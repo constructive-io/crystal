@@ -29,6 +29,7 @@ const DEPENDENCY_SCHEMA = "scope_dependency";
 const UNRELATED_SCHEMA = "scope_unrelated";
 const EXTENSION_SCHEMA = "scope_extension";
 const CAPABILITY_ROOT_SCHEMA = "scope_capability_root";
+const PARTITION_ROOT_SCHEMA = "scope_partition_root";
 
 interface SchemaBuild {
   schema: GraphQLSchema;
@@ -282,6 +283,30 @@ describe("schema-scoped PostgreSQL introspection", () => {
         index.getIndexClass()?.relname.includes("trgm"),
       ),
     ).toBe(false);
+  });
+
+  it("retains extension metadata for a partitioned index access method", async () => {
+    const partitionOnly = await buildSchema(pool, true, PARTITION_ROOT_SCHEMA);
+
+    const partitionedIndex = partitionOnly.introspection.classes.find(
+      (entity) => entity.relname === "partitioned_items_idx",
+    );
+    expect(partitionedIndex?.relkind).toBe("I");
+    expect(
+      partitionOnly.introspection.classes.some(
+        (entity) => entity.relkind === "i",
+      ),
+    ).toBe(false);
+    expect(
+      partitionOnly.introspection.extensions.some(
+        (extension) => extension.extname === "plpgsql",
+      ),
+    ).toBe(true);
+    expect(
+      partitionOnly.introspection.extensions.some(
+        (extension) => extension.extname === "pg_trgm",
+      ),
+    ).toBe(true);
   });
 
   it("fails fast when a configured root schema is missing", async () => {
