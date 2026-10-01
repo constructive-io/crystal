@@ -16,6 +16,62 @@ creates the relevant GraphQL types, fields, and [grafast][] plan resolver
 functions. The result is a high-performance, powerful, auto-generated but highly
 flexible GraphQL schema.
 
+## Schema-scoped introspection
+
+PostgreSQL services can opt into schema-scoped introspection through gather
+options keyed by service name. Use `true` to enable it with defaults, `false` to
+explicitly disable it, or an options object to customize it. Services without an
+entry continue to use the full catalog query.
+
+```ts
+const preset = {
+  // ...
+  gather: {
+    pgScopedIntrospection: {
+      main: true,
+    },
+  },
+};
+```
+
+For advanced configuration:
+
+```ts
+const preset = {
+  pgServices: [
+    makePgService({
+      name: "main",
+      connectionString: process.env.DATABASE_URL,
+      schemas: ["app_public"],
+    }),
+  ],
+  gather: {
+    pgScopedIntrospection: {
+      main: {
+        catalogTypes: "dependency-closure" as const,
+        capabilityExtensions: ["pg_trgm"],
+      },
+    },
+  },
+};
+```
+
+The service's `schemas` are the roots of the introspection query. Referenced
+objects in other schemas are discovered and retained automatically, while
+unrelated objects are excluded. Configuration for an unknown service name fails
+rather than being silently ignored.
+
+`pg-introspection` owns the scoped query plan and validates the parsed result
+against that same plan. `graphile-build-pg` only selects stock or scoped mode
+for each service, executes the query, and adds service context to errors.
+
+Extensions required by retained objects, such as the operator class behind a
+`pg_trgm` index, are discovered automatically. `capabilityExtensions` is for a
+different case: it retains lightweight metadata proving that an extension is
+installed even when no retained object directly depends on it. For example, a
+plugin can check for `pg_trgm` before exposing an optional search capability. It
+does not install the extension or retain every object owned by it.
+
 If you don't want to use your database introspection results to generate the
 schema, you can instead build the registry yourself giving you full control over
 what goes into your GraphQL API whilst still saving you significant effort

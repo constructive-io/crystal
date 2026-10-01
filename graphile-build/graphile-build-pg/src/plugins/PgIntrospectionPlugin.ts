@@ -20,10 +20,14 @@ import type {
   PgRange,
   PgRoles,
   PgType,
+  SchemaScopedIntrospectionOptions,
+  SchemaScopedIntrospectionPlan,
 } from "pg-introspection";
 import {
   makeIntrospectionQuery,
+  makeSchemaScopedIntrospectionPlan,
   parseIntrospectionResults,
+  validateSchemaScopedIntrospection,
 } from "pg-introspection";
 
 import { version } from "../version.ts";
@@ -48,6 +52,17 @@ export type PgEntityWithId =
   | PgIndex
   | PgLanguage;
 
+type PgScopedIntrospectionOptions = SchemaScopedIntrospectionOptions;
+
+type PgScopedIntrospectionServiceConfig =
+  | boolean
+  | PgScopedIntrospectionOptions;
+
+interface IntrospectionQueryPlan {
+  query: { text: string; values?: unknown[] };
+  scopedPlan: SchemaScopedIntrospectionPlan | null;
+}
+
 declare global {
   namespace GraphileBuild {
     interface GatherOptions {
@@ -57,6 +72,15 @@ declare global {
        * Default: true
        */
       installWatchFixtures?: boolean;
+
+      /**
+       * Schema-scoped introspection options keyed by PostgreSQL service name.
+       * `true` enables defaults, `false` disables, and an object customizes it.
+       * Services without an entry continue to use stock introspection.
+       */
+      pgScopedIntrospection?: Readonly<
+        Record<string, PgScopedIntrospectionServiceConfig>
+      >;
     }
   }
 
@@ -236,9 +260,63 @@ declare global {
   }
 }
 
+function getIntrospectionQuery(
+  pgService: GraphileConfig.PgServiceConfiguration,
+  config?: PgScopedIntrospectionServiceConfig,
+): IntrospectionQueryPlan {
+  if (!config) {
+    return {
+      query: { text: makeIntrospectionQuery() },
+      scopedPlan: null,
+    };
+  }
+
+  const options = config === true ? {} : config;
+  let scopedPlan: SchemaScopedIntrospectionPlan;
+  try {
+    scopedPlan = makeSchemaScopedIntrospectionPlan(
+      pgService.schemas ?? [],
+      options,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Schema-scoped introspection plan construction failed for PostgreSQL service '${pgService.name}': ${message}`,
+      { cause: error },
+    );
+  }
+
+  return {
+    query: scopedPlan.query,
+    scopedPlan,
+  };
+}
+
+function assertScopedIntrospectionServices(
+  pgServices: ReadonlyArray<GraphileConfig.PgServiceConfiguration> | undefined,
+  options: GraphileBuild.GatherOptions["pgScopedIntrospection"],
+): void {
+  if (!options) return;
+
+  const serviceNames = new Set(
+    (pgServices ?? []).map((pgService) => pgService.name),
+  );
+  const unknownServiceNames = Object.keys(options).filter(
+    (serviceName) => !serviceNames.has(serviceName),
+  );
+  if (unknownServiceNames.length > 0) {
+    throw new Error(
+      `Schema-scoped introspection configured for unknown PostgreSQL service(s): ${unknownServiceNames.join(
+        ", ",
+      )}`,
+    );
+  }
+}
+
 type RawIntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
   introspectionText: string;
+  scopedPlan: SchemaScopedIntrospectionPlan | null;
 }>;
 type IntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
@@ -539,11 +617,26 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
             const rawIntrospections = await introspectionPromise;
 
             const introspections: IntrospectionResults = rawIntrospections.map(
-              ({ pgService, introspectionText }) => ({
-                pgService,
+              ({ pgService, introspectionText, scopedPlan }) => {
                 // IMPORTANT: parseIntrospectionResults must NOT be cached, because other plugins mutate it.
-                introspection: parseIntrospectionResults(introspectionText),
-              }),
+                const introspection =
+                  parseIntrospectionResults(introspectionText);
+                if (scopedPlan) {
+                  try {
+                    validateSchemaScopedIntrospection(
+                      introspection,
+                      scopedPlan,
+                    );
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    throw new Error(
+                      `Schema-scoped introspection validation failed for PostgreSQL service '${pgService.name}': ${message}`,
+                    );
+                  }
+                }
+                return { pgService, introspection };
+              },
             );
 
             // Store the resolved state, so access during announcements doesn't cause the system to hang
@@ -779,6 +872,8 @@ function introspectPgServices(
 ): Promise<RawIntrospectionResults> {
   const { withPgClientFromPgService } = info.lib.dataplanPg;
   const pgServices = info.resolvedPreset.pgServices;
+  const scopedIntrospection = info.options.pgScopedIntrospection;
+  assertScopedIntrospectionServices(pgServices, scopedIntrospection);
   if (!pgServices) {
     return Promise.resolve([]);
   }
@@ -834,21 +929,25 @@ function introspectPgServices(
       }
 
       // Do the introspection
-      const introspectionQuery = makeIntrospectionQuery();
+      const { query, scopedPlan } = getIntrospectionQuery(
+        pgService,
+        scopedIntrospection?.[name],
+      );
       const {
         rows: [row],
       } = await withPgClientFromPgService(
         pgService,
         pgService.pgSettingsForIntrospection ?? null,
-        (client) =>
-          client.query<{ introspection: string }>({
-            text: introspectionQuery,
-          }),
+        (client) => client.query<{ introspection: string }>(query),
       );
       if (!row) {
         throw new Error("Introspection failed");
       }
-      return { pgService, introspectionText: row.introspection };
+      return {
+        pgService,
+        introspectionText: row.introspection,
+        scopedPlan,
+      };
     }),
   );
 }
