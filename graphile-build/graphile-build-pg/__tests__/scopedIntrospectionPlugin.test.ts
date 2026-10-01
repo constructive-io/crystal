@@ -9,6 +9,7 @@ import {
   PgScopedIntrospectionPreset,
   type PgScopedIntrospectionServiceConfig,
 } from "../src/index.ts";
+import { GraphileBuildPgLibPreset } from "../src/preset.ts";
 
 interface CaptureOptions {
   config?: PgScopedIntrospectionServiceConfig;
@@ -54,6 +55,7 @@ async function captureIntrospectionQuery({
 
   await expect(
     gather({
+      extends: [GraphileBuildPgLibPreset],
       plugins: [PgIntrospectionPlugin, ...plugins, IntrospectionConsumerPlugin],
       pgServices: [pgService],
       ...(config === undefined
