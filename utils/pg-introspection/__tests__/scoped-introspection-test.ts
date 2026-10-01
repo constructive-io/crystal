@@ -88,6 +88,16 @@ describe("schema-scoped introspection query", () => {
 
   it("supports full and dependency-closure catalog type policies", () => {
     const all = makeSchemaScopedIntrospectionQuery(["tenant_a"]);
+    assert.deepEqual(
+      makeSchemaScopedIntrospectionQuery(["tenant_a"], { catalogTypes: "all" }),
+      all,
+    );
+    assert.deepEqual(
+      makeSchemaScopedIntrospectionQuery(["tenant_a"], {
+        catalogTypes: undefined,
+      }),
+      all,
+    );
     const closure = makeSchemaScopedIntrospectionQuery(["tenant_a"], {
       catalogTypes: "dependency-closure",
     });
@@ -108,7 +118,26 @@ describe("schema-scoped introspection query", () => {
     );
   });
 
-  it("shares normalized scope data between query and validation", () => {
+  it("rejects invalid catalog type policies from JSON configuration", () => {
+    for (const catalogTypes of [
+      "dependancy-closure",
+      "",
+      null,
+      false,
+      42,
+      {},
+      [],
+    ]) {
+      const options = JSON.parse(JSON.stringify({ catalogTypes }));
+      assert.throws(
+        () => makeSchemaScopedIntrospectionPlan(["app_public"], options),
+        /catalogTypes must be "all" or "dependency-closure"/u,
+        JSON.stringify(catalogTypes),
+      );
+    }
+  });
+
+  it("keeps normalized scope data independent of mutable query parameters", () => {
     const plan = makeSchemaScopedIntrospectionPlan(
       ["app_public", "app_public"],
       {
@@ -122,8 +151,18 @@ describe("schema-scoped introspection query", () => {
       catalogTypes: "dependency-closure",
       capabilityExtensions: ["pg_trgm"],
     });
-    assert.equal(plan.query.values[0], plan.scope.schemas);
-    assert.equal(plan.query.values[1], plan.scope.capabilityExtensions);
+    assert.deepEqual(plan.query.values, [["app_public"], ["pg_trgm"]]);
+    assert.notEqual(plan.query.values[0], plan.scope.schemas);
+    assert.notEqual(plan.query.values[1], plan.scope.capabilityExtensions);
+
+    plan.query.values[0].length = 0;
+    plan.query.values[1].push("another_extension");
+    assert.deepEqual(plan.scope.schemas, ["app_public"]);
+    assert.deepEqual(plan.scope.capabilityExtensions, ["pg_trgm"]);
+    assert.throws(
+      () => validateSchemaScopedIntrospection(makeIntrospection(), plan),
+      /did not find required schema\(s\): app_public/u,
+    );
   });
 
   it("fails fast when a required root schema is missing", () => {
