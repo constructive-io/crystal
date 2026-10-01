@@ -65,6 +65,40 @@ async function main() {
 main();
 ```
 
+### Schema-scoped introspection
+
+For databases with a large catalog, `makeSchemaScopedIntrospectionQuery()` can
+limit the result to objects in selected schemas and their transitive catalog
+dependencies:
+
+```js
+import {
+  makeSchemaScopedIntrospectionPlan,
+  parseIntrospectionResults,
+  validateSchemaScopedIntrospection,
+} from "pg-introspection";
+
+const plan = makeSchemaScopedIntrospectionPlan(["app_public"], {
+  catalogTypes: "dependency-closure",
+  capabilityExtensions: ["pg_trgm"],
+});
+const { rows } = await pool.query(plan.query);
+const introspection = parseIntrospectionResults(rows[0].introspection);
+validateSchemaScopedIntrospection(introspection, plan);
+```
+
+Schema and extension names are passed as query parameters. The dependency
+closure includes referenced relations, constraints, function signature types,
+domains, arrays, ranges, multiranges, indexes, inheritance parents, and
+extension metadata required by retained indexes. Dependencies cross schema
+boundaries automatically when a retained object needs them; unrelated objects
+are excluded.
+
+Extensions required by retained objects are also discovered automatically. Use
+`capabilityExtensions` for extensions whose metadata is needed as an explicit
+capability even when no retained object currently depends on it. This retains
+the extension record, not every object owned by the extension.
+
 ## Accessors
 
 Into the introspection results we mix "accessor" functions to make following

@@ -48,6 +48,11 @@ export type PgEntityWithId =
   | PgIndex
   | PgLanguage;
 
+export interface PgIntrospectionQuery {
+  text: string;
+  values?: unknown[];
+}
+
 declare global {
   namespace GraphileBuild {
     interface GatherOptions {
@@ -168,8 +173,17 @@ declare global {
     }
 
     interface GatherHooks {
+      /**
+       * Enables plugins to replace the PostgreSQL introspection query for a
+       * service. The event starts with the stock introspection query.
+       */
+      pgIntrospection_query(event: {
+        pgService: GraphileConfig.PgServiceConfiguration;
+        query: PgIntrospectionQuery;
+      }): PromiseOrDirect<void>;
       pgIntrospection_introspection(event: {
         introspection: Introspection;
+        query: PgIntrospectionQuery;
         serviceName: string;
       }): PromiseOrDirect<void>;
       pgIntrospection_namespace(event: {
@@ -239,6 +253,7 @@ declare global {
 type RawIntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
   introspectionText: string;
+  query: PgIntrospectionQuery;
 }>;
 type IntrospectionResults = Array<{
   pgService: GraphileConfig.PgServiceConfiguration;
@@ -528,8 +543,17 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
             // Introspect the database (or read it from CLEAN cache)
             const introspectionPromise =
               info.cache.introspectionResultsPromise ??
-              (info.cache.introspectionResultsPromise =
-                introspectPgServices(info));
+              (info.cache.introspectionResultsPromise = introspectPgServices(
+                info,
+                async (pgService) => {
+                  const event = {
+                    pgService,
+                    query: { text: makeIntrospectionQuery() },
+                  };
+                  await info.process("pgIntrospection_query", event);
+                  return event.query;
+                },
+              ));
 
             // Don't cache errors
             introspectionPromise.then(null, () => {
@@ -538,6 +562,12 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
 
             const rawIntrospections = await introspectionPromise;
 
+            const queryByServiceName = new Map(
+              rawIntrospections.map(({ pgService, query }) => [
+                pgService.name,
+                query,
+              ]),
+            );
             const introspections: IntrospectionResults = rawIntrospections.map(
               ({ pgService, introspectionText }) => ({
                 pgService,
@@ -599,6 +629,7 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
                 }
                 await info.process("pgIntrospection_introspection", {
                   introspection,
+                  query: queryByServiceName.get(pgService.name)!,
                   serviceName: pgService.name,
                 });
                 await announce("pgIntrospection_namespace", namespaces);
@@ -776,6 +807,9 @@ export const PgIntrospectionPlugin: GraphileConfig.Plugin = {
 
 function introspectPgServices(
   info: GatherPluginContext<State, Cache>,
+  getIntrospectionQuery: (
+    pgService: GraphileConfig.PgServiceConfiguration,
+  ) => Promise<PgIntrospectionQuery>,
 ): Promise<RawIntrospectionResults> {
   const { withPgClientFromPgService } = info.lib.dataplanPg;
   const pgServices = info.resolvedPreset.pgServices;
@@ -834,21 +868,22 @@ function introspectPgServices(
       }
 
       // Do the introspection
-      const introspectionQuery = makeIntrospectionQuery();
+      const introspectionQuery = await getIntrospectionQuery(pgService);
       const {
         rows: [row],
       } = await withPgClientFromPgService(
         pgService,
         pgService.pgSettingsForIntrospection ?? null,
-        (client) =>
-          client.query<{ introspection: string }>({
-            text: introspectionQuery,
-          }),
+        (client) => client.query<{ introspection: string }>(introspectionQuery),
       );
       if (!row) {
         throw new Error("Introspection failed");
       }
-      return { pgService, introspectionText: row.introspection };
+      return {
+        pgService,
+        introspectionText: row.introspection,
+        query: introspectionQuery,
+      };
     }),
   );
 }
