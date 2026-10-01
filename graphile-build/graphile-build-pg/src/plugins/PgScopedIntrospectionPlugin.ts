@@ -89,13 +89,23 @@ export const PgScopedIntrospectionPlugin: GraphileConfig.Plugin = {
         );
         if (!options) return;
 
-        const plan = makeSchemaScopedIntrospectionPlan(
-          event.pgService.schemas ?? [],
-          {
-            catalogTypes: options.catalogTypes,
-            capabilityExtensions: options.capabilityExtensions,
-          },
-        );
+        let plan: SchemaScopedIntrospectionPlan;
+        try {
+          plan = makeSchemaScopedIntrospectionPlan(
+            event.pgService.schemas ?? [],
+            {
+              catalogTypes: options.catalogTypes,
+              capabilityExtensions: options.capabilityExtensions,
+            },
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Schema-scoped introspection plan construction failed for PostgreSQL service '${event.pgService.name}': ${message}`,
+            { cause: error },
+          );
+        }
         plansByQuery.set(plan.query, plan);
         event.query = plan.query;
       },

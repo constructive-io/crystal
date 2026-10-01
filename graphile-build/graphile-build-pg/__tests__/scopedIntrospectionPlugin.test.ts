@@ -14,17 +14,23 @@ import { GraphileBuildPgLibPreset } from "../src/preset.ts";
 interface CaptureOptions {
   config?: PgScopedIntrospectionServiceConfig;
   plugins?: GraphileConfig.Plugin[];
+  serviceName?: string;
+  schemas?: string[];
+  onQuery?: (query: PgIntrospectionQuery) => void;
 }
 
 async function captureIntrospectionQuery({
   config,
   plugins = [],
+  serviceName = "main",
+  schemas = ["app_public"],
+  onQuery,
 }: CaptureOptions = {}): Promise<PgIntrospectionQuery> {
   let capturedQuery: PgIntrospectionQuery | undefined;
   const queryCaptured = new Error("query captured");
   const pgService = {
-    name: "main",
-    schemas: ["app_public"],
+    name: serviceName,
+    schemas,
     withPgClientKey: "withPgClient",
     pgSettingsKey: "pgSettings",
     adaptorSettings: {},
@@ -36,6 +42,7 @@ async function captureIntrospectionQuery({
         ) =>
           callback({
             query(query: PgIntrospectionQuery) {
+              onQuery?.(query);
               capturedQuery = query;
               throw queryCaptured;
             },
@@ -53,8 +60,8 @@ async function captureIntrospectionQuery({
     },
   };
 
-  await expect(
-    gather({
+  try {
+    await gather({
       extends: [GraphileBuildPgLibPreset],
       plugins: [PgIntrospectionPlugin, ...plugins, IntrospectionConsumerPlugin],
       pgServices: [pgService],
@@ -62,13 +69,17 @@ async function captureIntrospectionQuery({
         ? null
         : {
             gather: {
-              pgScopedIntrospection: { main: config },
+              pgScopedIntrospection: { [serviceName]: config },
             },
           }),
-    }),
-  ).rejects.toBe(queryCaptured);
-  expect(capturedQuery).toBeDefined();
-  return capturedQuery!;
+    });
+  } catch (error) {
+    if (error !== queryCaptured) throw error;
+  }
+  if (!capturedQuery) {
+    throw new Error("PostgreSQL introspection query was not executed");
+  }
+  return capturedQuery;
 }
 
 describe("PostgreSQL introspection query hook", () => {
@@ -190,4 +201,42 @@ describe("PgScopedIntrospectionPlugin", () => {
       PgScopedIntrospectionPlugin,
     ]);
   });
+
+  it.each([
+    {
+      schemas: [],
+      config: true,
+      reason: "Schema-scoped introspection requires at least one schema",
+    },
+    {
+      schemas: ["pg_catalog"],
+      config: true,
+      reason:
+        "Schema-scoped introspection cannot expose system schema 'pg_catalog'",
+    },
+    {
+      schemas: ["app_public"],
+      config: JSON.parse('{"catalogTypes":"dependancy-closure"}'),
+      reason:
+        'Schema-scoped introspection catalogTypes must be "all" or "dependency-closure"; received \'dependancy-closure\'',
+    },
+  ])(
+    "identifies the service when plan construction fails: $reason",
+    async ({ schemas, config, reason }) => {
+      const onQuery = jest.fn();
+      await expect(
+        captureIntrospectionQuery({
+          config,
+          plugins: [PgScopedIntrospectionPlugin],
+          serviceName: "analytics",
+          schemas,
+          onQuery,
+        }),
+      ).rejects.toMatchObject({
+        message: `Schema-scoped introspection plan construction failed for PostgreSQL service 'analytics': ${reason}`,
+        cause: expect.objectContaining({ message: reason }),
+      });
+      expect(onQuery).not.toHaveBeenCalled();
+    },
+  );
 });
