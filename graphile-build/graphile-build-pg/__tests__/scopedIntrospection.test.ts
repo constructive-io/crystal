@@ -3,6 +3,7 @@ import type { SchemaScopedIntrospectionOptions } from "pg-introspection";
 import { makeIntrospectionQuery } from "pg-introspection";
 
 import { PgIntrospectionPlugin } from "../src/index.ts";
+import { GraphileBuildPgLibPreset } from "../src/preset.ts";
 
 interface IntrospectionQuery {
   text: string;
@@ -49,6 +50,7 @@ async function captureIntrospectionQuery(
 
   try {
     await gather({
+      extends: [GraphileBuildPgLibPreset],
       plugins: [PgIntrospectionPlugin, IntrospectionConsumerPlugin],
       pgServices: [pgService],
       ...(configByService
